@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Korea Trip · Itinerary</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>✈️</text></svg>">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+<header class="hero">
+  <div class="hero-inner">
+    <p class="kicker">Trip Companion</p>
+    <h1 id="trip-name">Korea Trip</h1>
+    <p class="sub" id="trip-dates"></p>
+    <div class="countdown" id="countdown" hidden></div>
+    <div class="identity-bar">
+      <button class="who" id="who-btn" title="Who is using this device">👤 …</button>
+      <button class="who" id="edit-trip-btn">✏️ Edit trip</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="card">
+    <h2>✈️ Flights</h2>
+    <p class="hint">Tap <em>Check status</em> to query live delays. <span id="flight-api-note"></span></p>
+    <div id="flights"></div>
+    <div class="section-actions">
+      <button class="btn primary" id="add-flight-btn">＋ Add flight</button>
+      <button class="btn" id="refresh-all-btn">🔄 Check all statuses</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>🗓️ Itinerary</h2>
+    <p class="hint">Where we're staying and what's next, day by day.</p>
+    <div class="timeline" id="itinerary"></div>
+    <div class="section-actions">
+      <button class="btn primary" id="add-day-btn">＋ Add a day</button>
+    </div>
+  </section>
+
+  <section class="card" id="notes-card" hidden>
+    <h2>📝 Trip notes</h2>
+    <p id="trip-notes" style="white-space:pre-wrap; font-size:14.5px;"></p>
+  </section>
+</main>
+
+<nav class="bottom-nav">
+  <a href="/" class="active"><span class="ico">🗓️</span>Itinerary</a>
+  <a href="/map.html"><span class="ico">📍</span>Find Us</a>
+</nav>
+
+<!-- flight editor -->
+<dialog id="flight-dialog">
+  <h3 id="flight-dialog-title">Add flight</h3>
+  <form id="flight-form" method="dialog">
+    <div class="form-grid">
+      <label class="f">Flight number<input name="flightNumber" placeholder="KE82" required></label>
+      <label class="f">Airline<input name="airline" placeholder="Korean Air"></label>
+      <label class="f">Date<input name="date" type="date" required></label>
+      <label class="f">&nbsp;<span></span></label>
+      <label class="f">From (airport)<input name="from" placeholder="ORD"></label>
+      <label class="f">To (airport)<input name="to" placeholder="ICN"></label>
+      <label class="f">Departs (local)<input name="depTimeLocal" placeholder="12:30"></label>
+      <label class="f">Arrives (local)<input name="arrTimeLocal" placeholder="16:40 (+1)"></label>
+      <label class="f wide">Notes<input name="notes" placeholder="Seat 34A, arrive 3h early…"></label>
+    </div>
+    <div class="dialog-actions">
+      <button class="btn" type="button" data-close>Cancel</button>
+      <button class="btn primary" type="submit">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- day editor -->
+<dialog id="day-dialog">
+  <h3 id="day-dialog-title">Add a day</h3>
+  <form id="day-form" method="dialog">
+    <div class="form-grid">
+      <label class="f">Date<input name="date" type="date" required></label>
+      <label class="f">City<input name="city" placeholder="Seoul"></label>
+      <label class="f wide">Day title<input name="title" placeholder="Palaces & Bukchon"></label>
+      <label class="f wide">Where we sleep (leave blank if same as before)<input name="stayName" placeholder="Hotel in Myeongdong"></label>
+      <label class="f wide">Stay address<input name="stayAddress" placeholder="Myeongdong, Jung-gu, Seoul"></label>
+      <label class="f wide">Plan — one item per line, "HH:MM activity"<textarea name="plan" rows="6" placeholder="09:00 Gyeongbokgung Palace&#10;12:00 Lunch in Insadong"></textarea></label>
+    </div>
+    <div class="dialog-actions">
+      <button class="btn" type="button" data-close>Cancel</button>
+      <button class="btn primary" type="submit">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- trip editor -->
+<dialog id="trip-dialog">
+  <h3>Edit trip</h3>
+  <form id="trip-form" method="dialog">
+    <label class="f">Trip name<input name="name" required></label>
+    <div class="form-grid">
+      <label class="f">Start date<input name="startDate" type="date"></label>
+      <label class="f">End date<input name="endDate" type="date"></label>
+    </div>
+    <label class="f">Notes<textarea name="notes" rows="3"></textarea></label>
+    <div class="dialog-actions">
+      <button class="btn" type="button" data-close>Cancel</button>
+      <button class="btn primary" type="submit">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="/js/common.js"></script>
+<script src="/js/trip.js"></script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      MQTT_URL: mqtt://mosquitto:1883
+      # FLIGHT_API_PROVIDER: aerodatabox
+      # FLIGHT_API_KEY: your-rapidapi-key
+    volumes:
+      - trip-data:/data
+    depends_on:
+      - mosquitto
+
+  # Bundled Mosquitto broker. Expose 1883 to your LAN so phones can publish;
+  # if the broker is reachable from the internet, enable auth + TLS first.
+  mosquitto:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-data:/mosquitto/data
+
+volumes:
+  trip-data:
+  mosquitto-data:
