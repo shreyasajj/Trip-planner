@@ -6,7 +6,7 @@ proxy on your home server.
 
 | Page | What it does |
 |---|---|
-| **🗓 Itinerary** (`/`) | Countdown to takeoff, your flights with **live delay lookups**, an at-a-glance strip of the trip's legs, and a day-by-day timeline of stays and plans. Everything editable in the UI. |
+| **🗓 Itinerary** (`/`) | Countdown to takeoff, an **editable SVG route map** (airport codes or place names, geocoded automatically), your flights with **live delay lookups**, an at-a-glance strip of the trip's legs, and a day-by-day timeline of stays and plans. Everything editable in the UI. |
 | **📍 Find Us** (`/map.html`) | Find-My-style live map fed by your **Mosquitto (MQTT) broker**, per-person location sharing toggles, **group food matching** (preferred / okay / absolutely-not), and **bill splitting** — snap a photo, **Claude reads the total and line items**, participants are auto-detected by location, split evenly or by item. |
 
 Data lives in a single JSON file (`data/db.json`), bill photos in `data/uploads/`.
@@ -50,9 +50,26 @@ location / {
 }
 ```
 
-**Auth:** the app itself has none by design — put it behind your reverse
-proxy's auth (basic auth, Authelia, Tailscale…). It shows people's locations;
-don't expose it bare.
+**Auth:** two options.
+
+1. **Built-in OIDC login** — set four variables in `.env` and every page and
+   API call requires a login through your identity provider (Authentik,
+   Authelia, Keycloak, Pocket ID — anything OpenID Connect):
+
+   ```ini
+   OIDC_ISSUER_URL=https://auth.example.com/application/o/trip/
+   OIDC_CLIENT_ID=trip-planner
+   OIDC_CLIENT_SECRET=...           # omit for a public client; PKCE always used
+   PUBLIC_URL=https://trip.example.com
+   ```
+
+   Register the client at your IdP with redirect URI
+   `https://trip.example.com/auth/callback`. Logged-in users get their IdP
+   name adopted as their trip identity automatically, plus a Logout link.
+   `/auth/login`, `/auth/callback`, `/auth/logout` are the endpoints.
+2. **No OIDC configured** — the app is open; put it behind your reverse
+   proxy's auth or a VPN (Tailscale). It shows people's locations; don't
+   expose it bare.
 
 ---
 
@@ -145,6 +162,9 @@ are discarded until they switch back on.
 | `MQTT_URL` | *(unset)* | e.g. `mqtt://192.168.1.10:1883` — live location off until set |
 | `MQTT_USERNAME` / `MQTT_PASSWORD` | *(unset)* | broker credentials |
 | `FLIGHT_API_PROVIDER` / `FLIGHT_API_KEY` | *(unset)* | `aerodatabox` or `aviationstack` + key |
+| `OIDC_ISSUER_URL` / `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | *(unset)* | OIDC login — off until issuer+client id set |
+| `PUBLIC_URL` | *(derived)* | external URL, used for the OIDC redirect URI + secure cookies |
+| `SESSION_SECRET` | *(auto)* | cookie signing key (auto-generated & persisted) |
 | `ANTHROPIC_API_KEY` | *(unset)* | enables receipt scanning |
 | `BILL_SCAN_MODEL` | `claude-opus-4-8` | Claude model for receipt scanning |
 | `OVERPASS_URL` | `https://overpass-api.de/api/interpreter` | self-hosted Overpass if you have one |

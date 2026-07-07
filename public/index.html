@@ -49,6 +49,16 @@
     <div class="glance-grid" id="glance-grid"></div>
   </section>
 
+  <section class="route-section" id="route-section" hidden>
+    <div class="section-label">The Route</div>
+    <h2 class="section-title">A line drawn <em>across the Pacific.</em></h2>
+    <div id="route-map-box"></div>
+    <div class="section-actions">
+      <button class="btn" id="edit-route-btn">✎ Edit route</button>
+      <span class="scan-note">distances not to scale</span>
+    </div>
+  </section>
+
   <main>
     <section class="card">
       <div class="section-label">Sec. I — The Flights</div>
@@ -127,6 +137,23 @@
     <div class="dialog-actions">
       <button class="btn" type="button" data-close>Cancel</button>
       <button class="btn primary" type="submit">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- route editor -->
+<dialog id="route-dialog">
+  <h3>Edit the route</h3>
+  <p class="scan-note" style="margin:0.5rem 0 0.2rem;">Airport codes (DFW, ICN, PUS…) or place names (Busan, Tokyo) — anything OpenStreetMap can find.</p>
+  <form id="route-form" method="dialog">
+    <div id="route-legs"></div>
+    <div class="section-actions" style="margin-top:0.8rem;">
+      <button class="btn small" type="button" id="add-leg-btn">＋ Add leg</button>
+    </div>
+    <p class="scan-note" id="route-error" style="color:var(--rouge);"></p>
+    <div class="dialog-actions">
+      <button class="btn" type="button" data-close>Cancel</button>
+      <button class="btn primary" type="submit" id="route-save-btn">Save & redraw</button>
     </div>
   </form>
 </dialog>

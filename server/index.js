@@ -10,6 +10,8 @@ import { ensurePerson, publicPerson, haversineMeters, groupCenter } from './peop
 import { fetchFlightStatus } from './flights.js';
 import { findFood } from './food.js';
 import { scanReceipt, scanAvailable } from './receiptScan.js';
+import { resolvePlace } from './routeMap.js';
+import { setupAuth } from './auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -17,6 +19,10 @@ const PORT = process.env.PORT || 3000;
 
 initDb();
 startMqtt();
+
+// Optional OIDC login — when configured, everything below this line
+// (static pages, uploads, and the whole API) requires a session.
+await setupAuth(app);
 
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, '..', 'public')));
@@ -44,7 +50,36 @@ app.get('/api/status', (req, res) => res.json({ mqtt: mqttStatus(), scan: scanAv
 // ---------- trip + itinerary ----------
 app.get('/api/trip', (req, res) => {
   const db = getDb();
-  res.json({ trip: db.trip, flights: db.flights, itinerary: db.itinerary });
+  res.json({ trip: db.trip, flights: db.flights, itinerary: db.itinerary, route: db.route || [] });
+});
+
+// Replace the whole route. Body: {legs: [{from: "DFW", to: "ICN", mode: "flight"}, ...]}
+// Endpoints may be strings (resolved via gazetteer/geocoder) or already-resolved
+// {label, code, lat, lon} objects from a previous save.
+app.put('/api/route', async (req, res) => {
+  const db = getDb();
+  const legs = Array.isArray(req.body?.legs) ? req.body.legs.slice(0, 30) : [];
+  const MODES = ['flight', 'rail', 'ferry', 'drive', 'return'];
+  try {
+    const route = [];
+    for (const leg of legs) {
+      const resolve = async (end) =>
+        end && typeof end === 'object' && Number.isFinite(end.lat) && Number.isFinite(end.lon)
+          ? { code: end.code || null, label: String(end.label || '').slice(0, 60), lat: end.lat, lon: end.lon }
+          : await resolvePlace(end);
+      route.push({
+        id: id(),
+        from: await resolve(leg.from),
+        to: await resolve(leg.to),
+        mode: MODES.includes(leg.mode) ? leg.mode : 'flight'
+      });
+    }
+    db.route = route;
+    saveNow();
+    res.json(route);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 app.put('/api/trip', (req, res) => {

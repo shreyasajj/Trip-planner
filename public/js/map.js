@@ -28,6 +28,7 @@ async function init() {
   document.querySelectorAll('#split-toggle button').forEach((b) =>
     b.addEventListener('click', () => setSplitMode(b.dataset.mode)));
 
+  await adoptServerIdentity();
   updateWho();
   await refreshAll();
   fitToPeople();

@@ -12,6 +12,7 @@ async function init() {
     document.getElementById(id)?.addEventListener('click', () => promptMe(true).then(updateWho));
   for (const id of ['edit-trip-btn', 'edit-trip-btn-m'])
     document.getElementById(id)?.addEventListener('click', openTripDialog);
+  await adoptServerIdentity();
   updateWho();
   wireDialogs();
   await load();
@@ -30,6 +31,7 @@ async function load() {
   tripData = await api.get('/api/trip');
   renderHeader();
   renderGlance();
+  renderRoute();
   renderFlights();
   renderItinerary();
 }
@@ -128,6 +130,209 @@ function renderGlance() {
         <div class="glance-nights">${nights} night${nights === 1 ? '' : 's'}</div>
       </div>`;
   }).join('');
+}
+
+/* ---------- route map ---------- */
+const MODE_STYLES = {
+  longhaul: { stroke: '#c8412c', width: 2, dash: null, label: 'LONG-HAUL' },
+  flight: { stroke: '#8a2818', width: 1.5, dash: '4 3', label: 'FLIGHT' },
+  rail: { stroke: '#b8893a', width: 2, dash: '2 2', label: 'RAIL' },
+  ferry: { stroke: '#6a8caa', width: 1.5, dash: '5 4', label: 'FERRY' },
+  drive: { stroke: '#4a6b5c', width: 1.5, dash: null, label: 'DRIVE' },
+  return: { stroke: '#4a6b5c', width: 1.5, dash: '6 3', label: 'RETURN' }
+};
+
+function haversineKm(a, b) {
+  const R = 6371, toR = (d) => (d * Math.PI) / 180;
+  const dLat = toR(b.lat - a.lat), dLon = toR(b.lon - a.lon);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(toR(a.lat)) * Math.cos(toR(b.lat)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+function legStyleKey(leg) {
+  if (leg.mode === 'flight' && haversineKm(leg.from, leg.to) > 5000) return 'longhaul';
+  return leg.mode;
+}
+
+// Spread clustered coordinates apart (order-preserving) so e.g. the Korean
+// airports stay readable next to a transpacific span. "Not to scale."
+function relaxAxis(values, min, max, minGap) {
+  const uniq = [...new Set(values.map((v) => Math.round(v * 1000) / 1000))].sort((a, b) => a - b);
+  if (uniq.length < 2) return (v) => (min + max) / 2;
+  const span = max - min;
+  let px = uniq.map((v) => min + ((v - uniq[0]) / (uniq[uniq.length - 1] - uniq[0])) * span);
+  for (let i = 1; i < px.length; i++) if (px[i] - px[i - 1] < minGap) px[i] = px[i - 1] + minGap;
+  // rescale back into [min, max]
+  const lo = px[0], hi = px[px.length - 1];
+  px = px.map((p) => min + ((p - lo) / (hi - lo || 1)) * span);
+  const table = new Map(uniq.map((v, i) => [v, px[i]]));
+  return (v) => {
+    const k = Math.round(v * 1000) / 1000;
+    if (table.has(k)) return table.get(k);
+    // interpolate for safety
+    let prev = uniq[0], next = uniq[uniq.length - 1];
+    for (const u of uniq) { if (u <= k) prev = u; if (u >= k) { next = u; break; } }
+    const t = next === prev ? 0 : (k - prev) / (next - prev);
+    return table.get(prev) + t * (table.get(next) - table.get(prev));
+  };
+}
+
+function renderRoute() {
+  const section = document.getElementById('route-section');
+  const route = tripData.route || [];
+  if (!route.length) { section.hidden = false; document.getElementById('route-map-box').innerHTML = '<div class="empty">No legs yet — hit Edit route to draw the journey.</div>'; return; }
+  section.hidden = false;
+
+  const W = 1200, H = 500, PADX = 110, PADY = 90;
+  const pts = route.flatMap((l) => [l.from, l.to]);
+  const X = relaxAxis(pts.map((p) => p.lon), PADX, W - PADX, 70);
+  const Y = relaxAxis(pts.map((p) => -p.lat), PADY, H - PADY - 40, 40); // -lat: north up
+
+  const P = (p) => [X(p.lon), Y(-p.lat)];
+
+  // paths
+  let paths = '';
+  route.forEach((leg, i) => {
+    const s = MODE_STYLES[legStyleKey(leg)];
+    const [x1, y1] = P(leg.from), [x2, y2] = P(leg.to);
+    const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy) || 1;
+    // perpendicular bulge: return legs arc the other way
+    const k = Math.max(14, len * 0.22) * (leg.mode === 'return' ? -1 : 1);
+    let px = -dy / len, py = dx / len;
+    if (py > 0) { px = -px; py = -py; } // prefer arcing upward
+    const cx = (x1 + x2) / 2 + px * k, cy = (y1 + y2) / 2 + py * k;
+    paths += `<path d="M ${x1.toFixed(1)} ${y1.toFixed(1)} Q ${cx.toFixed(1)} ${cy.toFixed(1)} ${x2.toFixed(1)} ${y2.toFixed(1)}" fill="none" stroke="${s.stroke}" stroke-width="${s.width}"${s.dash ? ` stroke-dasharray="${s.dash}"` : ''} opacity="0.9"/>`;
+    void i;
+  });
+
+  // markers (dedupe by position)
+  const seen = new Map();
+  for (const p of pts) {
+    const [x, y] = P(p);
+    const key = `${Math.round(x)},${Math.round(y)}`;
+    if (!seen.has(key)) seen.set(key, { x, y, p });
+  }
+  let markers = '';
+  for (const { x, y, p } of seen.values()) {
+    const name = p.code || p.label.toUpperCase();
+    markers += `
+      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="5" fill="#c8412c"/>
+      <text x="${x.toFixed(1)}" y="${(y + 21).toFixed(1)}" text-anchor="middle" font-weight="600" font-size="11">${esc(name)}</text>
+      ${p.label && p.code ? `<text x="${x.toFixed(1)}" y="${(y + 34).toFixed(1)}" text-anchor="middle" font-size="9" opacity="0.6" font-style="italic" font-family="Fraunces, serif">${esc(p.label)}</text>` : ''}`;
+  }
+
+  // legend from the modes in use
+  const used = [...new Set(route.map(legStyleKey))];
+  let lx = 60;
+  const legend = used.map((k) => {
+    const s = MODE_STYLES[k];
+    const item = `
+      <line x1="${lx}" y1="0" x2="${lx + 30}" y2="0" stroke="${s.stroke}" stroke-width="${s.width}"${s.dash ? ` stroke-dasharray="${s.dash}"` : ''}/>
+      <text x="${lx + 40}" y="3" letter-spacing="0.1em">${s.label}</text>`;
+    lx += 55 + s.label.length * 8 + 40;
+    return item;
+  }).join('');
+
+  document.getElementById('route-map-box').innerHTML = `
+  <svg class="route-map" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <pattern id="rgrid" width="40" height="40" patternUnits="userSpaceOnUse">
+        <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1a1612" stroke-width="0.3" opacity="0.1"/>
+      </pattern>
+    </defs>
+    <rect width="${W}" height="${H}" fill="url(#rgrid)"/>
+    <rect x="0" y="${H * 0.28}" width="${W}" height="${H * 0.45}" fill="#6a8caa" opacity="0.06"/>
+    ${paths}
+    <g font-family="JetBrains Mono, monospace" fill="#1a1612">${markers}</g>
+    <g transform="translate(${W - 100}, 80)">
+      <circle r="30" fill="none" stroke="#1a1612" stroke-width="0.5" opacity="0.4"/>
+      <path d="M 0 -25 L 5 0 L 0 25 L -5 0 Z" fill="#c8412c" opacity="0.8"/>
+      <path d="M -25 0 L 0 -5 L 25 0 L 0 5 Z" fill="#1a1612" opacity="0.4"/>
+      <text y="-35" text-anchor="middle" font-family="Fraunces, serif" font-style="italic" font-size="10" fill="#1a1612">N</text>
+    </g>
+    <g transform="translate(0, ${H - 40})" font-family="JetBrains Mono, monospace" font-size="9" fill="#1a1612">${legend}</g>
+  </svg>`;
+}
+
+/* ---------- route editor ---------- */
+let routeDraft = [];
+
+function openRouteDialog() {
+  // Draft keeps resolved endpoints; edited fields fall back to string queries.
+  routeDraft = (tripData.route || []).map((l) => ({
+    from: l.from, to: l.to, mode: l.mode,
+    fromText: l.from.code || l.from.label,
+    toText: l.to.code || l.to.label
+  }));
+  if (!routeDraft.length) addDraftLeg();
+  document.getElementById('route-error').textContent = '';
+  renderRouteLegs();
+  document.getElementById('route-dialog').showModal();
+}
+
+function addDraftLeg() {
+  const prev = routeDraft[routeDraft.length - 1];
+  routeDraft.push({
+    from: null, to: null, mode: 'flight',
+    fromText: prev ? prev.toText : '', toText: ''
+  });
+}
+
+function renderRouteLegs() {
+  const box = document.getElementById('route-legs');
+  box.innerHTML = routeDraft.map((leg, i) => `
+    <div class="route-leg-row" data-i="${i}">
+      <input data-f="fromText" value="${esc(leg.fromText)}" placeholder="DFW">
+      <span class="arr">→</span>
+      <input data-f="toText" value="${esc(leg.toText)}" placeholder="ICN">
+      <select data-f="mode">
+        ${['flight', 'rail', 'ferry', 'drive', 'return'].map((m) =>
+          `<option ${leg.mode === m ? 'selected' : ''}>${m}</option>`).join('')}
+      </select>
+      <button class="btn small danger del" type="button" data-act="del">✕</button>
+    </div>
+  `).join('');
+
+  box.querySelectorAll('.route-leg-row').forEach((row) => {
+    const leg = routeDraft[Number(row.dataset.i)];
+    row.querySelectorAll('[data-f]').forEach((el) =>
+      el.addEventListener('input', () => {
+        leg[el.dataset.f] = el.value;
+        // typing a new place invalidates the previously resolved coords
+        if (el.dataset.f === 'fromText') leg.from = null;
+        if (el.dataset.f === 'toText') leg.to = null;
+      }));
+    row.querySelector('[data-act=del]').addEventListener('click', () => {
+      routeDraft.splice(Number(row.dataset.i), 1);
+      renderRouteLegs();
+    });
+  });
+}
+
+async function saveRoute(e) {
+  e.preventDefault();
+  const btn = document.getElementById('route-save-btn');
+  const errEl = document.getElementById('route-error');
+  btn.disabled = true;
+  btn.textContent = 'Resolving places…';
+  errEl.textContent = '';
+  try {
+    const legs = routeDraft
+      .filter((l) => (l.fromText || '').trim() && (l.toText || '').trim())
+      .map((l) => ({
+        from: l.from && (l.from.code || l.from.label) === l.fromText.trim() ? l.from : l.fromText.trim(),
+        to: l.to && (l.to.code || l.to.label) === l.toText.trim() ? l.to : l.toText.trim(),
+        mode: l.mode
+      }));
+    tripData.route = await api.put('/api/route', { legs });
+    renderRoute();
+    document.getElementById('route-dialog').close();
+  } catch (err) {
+    errEl.textContent = '⚠ ' + err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Save & redraw';
+  }
 }
 
 /* ---------- flights ---------- */
@@ -279,6 +484,9 @@ function wireDialogs() {
 
   document.getElementById('add-flight-btn').addEventListener('click', () => openFlightDialog(null));
   document.getElementById('add-day-btn').addEventListener('click', () => openDayDialog(null));
+  document.getElementById('edit-route-btn').addEventListener('click', openRouteDialog);
+  document.getElementById('add-leg-btn').addEventListener('click', () => { addDraftLeg(); renderRouteLegs(); });
+  document.getElementById('route-form').addEventListener('submit', saveRoute);
   document.getElementById('refresh-all-btn').addEventListener('click', async () => {
     for (const f of tripData.flights) {
       const card = document.querySelector(`.flight[data-id="${f.id}"]`);

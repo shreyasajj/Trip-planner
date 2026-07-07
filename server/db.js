@@ -183,6 +183,13 @@ const SEED = {
       ]
     }
   ],
+  route: [
+    { id: 'r1', from: { code: 'DFW', label: 'Dallas', lat: 32.897, lon: -97.038 }, to: { code: 'ICN', label: 'Seoul · Incheon', lat: 37.469, lon: 126.451 }, mode: 'flight' },
+    { id: 'r2', from: { code: 'SEL', label: 'Seoul', lat: 37.5665, lon: 126.978 }, to: { code: 'PUS', label: 'Busan', lat: 35.179, lon: 129.076 }, mode: 'rail' },
+    { id: 'r3', from: { code: 'PUS', label: 'Busan', lat: 35.179, lon: 129.076 }, to: { code: 'CJU', label: 'Jeju', lat: 33.511, lon: 126.493 }, mode: 'flight' },
+    { id: 'r4', from: { code: 'CJU', label: 'Jeju', lat: 33.511, lon: 126.493 }, to: { code: 'ICN', label: 'Seoul · Incheon', lat: 37.469, lon: 126.451 }, mode: 'flight' },
+    { id: 'r5', from: { code: 'ICN', label: 'Seoul · Incheon', lat: 37.469, lon: 126.451 }, to: { code: 'DFW', label: 'Dallas', lat: 32.897, lon: -97.038 }, mode: 'return' }
+  ],
   people: {},
   bills: []
 };

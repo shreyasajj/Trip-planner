@@ -45,6 +45,24 @@ async function promptMe(force = false) {
   return current;
 }
 
+// --- OIDC integration: adopt the logged-in user's name as identity ---
+async function adoptServerIdentity() {
+  try {
+    const d = await api.get('/api/me');
+    if (d.auth) {
+      const nav = document.querySelector('.meta-nav');
+      if (nav && !document.getElementById('logout-link')) {
+        const a = document.createElement('a');
+        a.id = 'logout-link';
+        a.href = '/auth/logout';
+        a.textContent = 'Logout';
+        nav.appendChild(a);
+      }
+      if (!getMe() && d.user?.name) await setMe(d.user.name);
+    }
+  } catch {}
+}
+
 // --- live updates ---
 function connectEvents(handlers) {
   const es = new EventSource('/api/events');

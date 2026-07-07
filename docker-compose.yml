@@ -8,6 +8,11 @@ services:
       MQTT_URL: mqtt://mosquitto:1883
       # FLIGHT_API_PROVIDER: aerodatabox
       # FLIGHT_API_KEY: your-rapidapi-key
+      # ANTHROPIC_API_KEY: sk-ant-...          # receipt scanning
+      # OIDC_ISSUER_URL: https://auth.example.com/application/o/trip/
+      # OIDC_CLIENT_ID: trip-planner
+      # OIDC_CLIENT_SECRET: "..."
+      # PUBLIC_URL: https://trip.example.com
     volumes:
       - trip-data:/data
     depends_on:
