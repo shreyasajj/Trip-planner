@@ -9,6 +9,7 @@ import { sseHandler, broadcast } from './sse.js';
 import { ensurePerson, publicPerson, haversineMeters, groupCenter } from './people.js';
 import { fetchFlightStatus } from './flights.js';
 import { findFood } from './food.js';
+import { scanReceipt, scanAvailable } from './receiptScan.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -38,7 +39,7 @@ const id = () => crypto.randomBytes(6).toString('hex');
 
 // ---------- live events ----------
 app.get('/api/events', sseHandler);
-app.get('/api/status', (req, res) => res.json({ mqtt: mqttStatus(), now: Date.now() }));
+app.get('/api/status', (req, res) => res.json({ mqtt: mqttStatus(), scan: scanAvailable(), now: Date.now() }));
 
 // ---------- trip + itinerary ----------
 app.get('/api/trip', (req, res) => {
@@ -222,21 +223,49 @@ app.get('/api/bills/nearby', (req, res) => {
   res.json({ detected, center: { lat, lon }, radius });
 });
 
+// Scan a bill photo with Claude vision. Keeps the uploaded photo so the
+// subsequent bill creation can reference it via photoPath (no re-upload).
+app.post('/api/bills/scan', upload.single('photo'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'photo required' });
+  try {
+    const data = await scanReceipt(req.file.path, req.file.mimetype);
+    res.json({ photoPath: `/uploads/${req.file.filename}`, ...data });
+  } catch (err) {
+    res.status(502).json({ error: err.message, photoPath: `/uploads/${req.file.filename}` });
+  }
+});
+
 app.post('/api/bills', upload.single('photo'), (req, res) => {
   const db = getDb();
   const amount = Number(req.body.amount);
   const paidBy = String(req.body.paidBy || '').trim();
-  let participants;
-  try {
-    participants = JSON.parse(req.body.participants || '[]');
-  } catch {
-    participants = [];
-  }
+  const parse = (s, fallback) => {
+    try { return JSON.parse(s); } catch { return fallback; }
+  };
+  let participants = parse(req.body.participants || '[]', []);
   participants = [...new Set(participants.map((s) => String(s).trim()).filter(Boolean))];
   if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: 'amount must be a positive number' });
   if (!paidBy) return res.status(400).json({ error: 'paidBy required' });
   if (!participants.includes(paidBy)) participants.push(paidBy);
-  if (participants.length < 1) return res.status(400).json({ error: 'at least one participant' });
+
+  // Items: [{name, price, assignedTo: [names]}] — empty assignedTo = shared by all.
+  let items = parse(req.body.items || '[]', []);
+  items = items
+    .map((it) => ({
+      name: String(it.name || 'Item').slice(0, 80),
+      price: Number(it.price) || 0,
+      assignedTo: [...new Set((it.assignedTo || []).map(String).filter((n) => participants.includes(n)))]
+    }))
+    .filter((it) => it.price > 0);
+
+  const splitMode = req.body.splitMode === 'items' && items.length ? 'items' : 'even';
+  const shares = computeShares(amount, participants, splitMode, items);
+
+  // Photo: either freshly uploaded, or the path returned by /api/bills/scan.
+  let photo = req.file ? `/uploads/${req.file.filename}` : null;
+  if (!photo && typeof req.body.photoPath === 'string' && /^\/uploads\/[\w.-]+$/.test(req.body.photoPath)) {
+    photo = req.body.photoPath;
+  }
 
   const bill = {
     id: id(),
@@ -245,7 +274,10 @@ app.post('/api/bills', upload.single('photo'), (req, res) => {
     currency: String(req.body.currency || 'KRW').slice(0, 5).toUpperCase(),
     paidBy,
     participants,
-    photo: req.file ? `/uploads/${req.file.filename}` : null,
+    splitMode,
+    items: splitMode === 'items' ? items : [],
+    shares,
+    photo,
     createdAt: Date.now()
   };
   db.bills.unshift(bill);
@@ -253,6 +285,30 @@ app.post('/api/bills', upload.single('photo'), (req, res) => {
   broadcast('bill', bill);
   res.json({ bill, summary: settle(db.bills) });
 });
+
+// Per-person share of one bill. Even mode: amount / N. Items mode: each item
+// is split among its assigned people (or everyone when unassigned); any
+// remainder up to the bill total (tax, service) is split evenly.
+function computeShares(amount, participants, splitMode, items) {
+  const shares = Object.fromEntries(participants.map((p) => [p, 0]));
+  if (splitMode !== 'items' || !items.length) {
+    for (const p of participants) shares[p] = amount / participants.length;
+    return roundShares(shares);
+  }
+  let itemsTotal = 0;
+  for (const it of items) {
+    const eaters = it.assignedTo.length ? it.assignedTo : participants;
+    for (const p of eaters) shares[p] += it.price / eaters.length;
+    itemsTotal += it.price;
+  }
+  const remainder = amount - itemsTotal; // tax / service charge / rounding
+  for (const p of participants) shares[p] += remainder / participants.length;
+  return roundShares(shares);
+}
+
+function roundShares(shares) {
+  return Object.fromEntries(Object.entries(shares).map(([k, v]) => [k, Math.round(v * 100) / 100]));
+}
 
 app.delete('/api/bills/:id', (req, res) => {
   const db = getDb();
@@ -262,16 +318,15 @@ app.delete('/api/bills/:id', (req, res) => {
   res.json({ ok: true, summary: settle(db.bills) });
 });
 
-// Even split per bill -> net balance per person -> minimal transfer list.
+// Per-bill shares (itemized or even) -> net balance per person -> minimal transfers.
 function settle(bills) {
-  const net = {}; // +ve = is owed money
   const byCurrency = {};
   for (const b of bills) {
     const cur = b.currency || 'KRW';
     byCurrency[cur] = byCurrency[cur] || {};
     const n = byCurrency[cur];
-    const share = b.amount / b.participants.length;
-    for (const person of b.participants) n[person] = (n[person] || 0) - share;
+    const shares = b.shares || Object.fromEntries(b.participants.map((p) => [p, b.amount / b.participants.length]));
+    for (const [person, share] of Object.entries(shares)) n[person] = (n[person] || 0) - share;
     n[b.paidBy] = (n[b.paidBy] || 0) + b.amount;
   }
   const settlements = {};
@@ -290,7 +345,6 @@ function settle(bills) {
     }
     settlements[cur] = { balances: Object.fromEntries(Object.entries(n).map(([k, v]) => [k, Math.round(v * 100) / 100])), transfers };
   }
-  net.byCurrency = settlements;
   return settlements;
 }
 

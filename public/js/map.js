@@ -14,14 +14,19 @@ async function init() {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
   }).addTo(map);
 
-  document.getElementById('who-btn').addEventListener('click', () => promptMe(true).then(refreshAll));
-  document.getElementById('browser-loc-btn').addEventListener('click', toggleBrowserLocation);
+  for (const id of ['who-btn', 'who-btn-m'])
+    document.getElementById(id)?.addEventListener('click', () => promptMe(true).then(refreshAll));
+  for (const id of ['browser-loc-btn', 'browser-loc-btn-m'])
+    document.getElementById(id)?.addEventListener('click', toggleBrowserLocation);
   document.getElementById('find-food-btn').addEventListener('click', findFood);
   document.getElementById('add-bill-btn').addEventListener('click', openBillDialog);
   document.querySelectorAll('dialog [data-close]').forEach((b) =>
     b.addEventListener('click', () => b.closest('dialog').close()));
   document.getElementById('prefs-form').addEventListener('submit', savePrefs);
   document.getElementById('bill-form').addEventListener('submit', submitBill);
+  document.getElementById('scan-btn').addEventListener('click', scanBill);
+  document.querySelectorAll('#split-toggle button').forEach((b) =>
+    b.addEventListener('click', () => setSplitMode(b.dataset.mode)));
 
   updateWho();
   await refreshAll();
@@ -43,7 +48,11 @@ async function init() {
 }
 
 function updateWho() {
-  document.getElementById('who-btn').textContent = `👤 ${getMe() || 'Set your name'}`;
+  const label = `👤 ${getMe() || 'Set your name'}`;
+  for (const id of ['who-btn', 'who-btn-m']) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = label;
+  }
 }
 
 async function refreshAll() {
@@ -69,6 +78,7 @@ async function pollMqttStatus() {
   try {
     const s = await api.get('/api/status');
     renderMqttStatus(s.mqtt);
+    window.scanAvailable = s.scan;
   } catch {}
   setTimeout(pollMqttStatus, 30000);
 }
@@ -95,9 +105,9 @@ function personIcon(p) {
     iconSize: [38, 46],
     iconAnchor: [19, 44],
     html: `<div style="width:38px;height:38px;border-radius:50% 50% 50% 4px;transform:rotate(-45deg);
-             background:${p.color};box-shadow:0 3px 8px rgba(0,0,0,.35);border:3px solid #fff;
+             background:${p.color};box-shadow:0 3px 8px rgba(26,22,18,.4);border:2.5px solid #f4ede1;
              display:flex;align-items:center;justify-content:center;">
-             <span style="transform:rotate(45deg);color:#fff;font-weight:800;font-family:sans-serif;font-size:15px;">${esc(initial)}</span>
+             <span style="transform:rotate(45deg);color:#f4ede1;font-weight:700;font-family:Fraunces,serif;font-size:16px;">${esc(initial)}</span>
            </div>`
   });
 }
@@ -143,7 +153,7 @@ function renderPeople() {
     <div class="person-row" data-name="${esc(p.name)}">
       <div class="avatar" style="background:${p.color}">${esc(p.name.slice(0, 1).toUpperCase())}</div>
       <div class="person-main">
-        <div class="nm">${esc(p.name)} ${p.name === me ? '<span class="badge muted">you</span>' : ''}</div>
+        <div class="nm">${esc(p.name)} ${p.name === me ? '<span class="tag">you</span>' : ''}</div>
         <div class="meta">
           ${p.sharing
             ? p.location
@@ -153,7 +163,7 @@ function renderPeople() {
         </div>
       </div>
       <div class="person-actions">
-        ${p.location ? `<button class="btn small" data-act="focus">🎯</button>` : ''}
+        ${p.location ? `<button class="btn small" data-act="focus">◎</button>` : ''}
         <label class="switch" title="Location sharing">
           <input type="checkbox" data-act="share" ${p.sharing ? 'checked' : ''}>
           <span class="track"></span>
@@ -185,13 +195,13 @@ function renderPeople() {
 
 /* ---------- browser geolocation fallback ---------- */
 async function toggleBrowserLocation() {
-  const btn = document.getElementById('browser-loc-btn');
+  const btns = ['browser-loc-btn', 'browser-loc-btn-m'].map((id) => document.getElementById(id)).filter(Boolean);
   const me = await promptMe();
   if (!me) return;
   if (browserWatchId != null) {
     navigator.geolocation.clearWatch(browserWatchId);
     browserWatchId = null;
-    btn.textContent = '📡 Send my location';
+    btns.forEach((b) => (b.textContent = '📡 Send my location'));
     return;
   }
   if (!navigator.geolocation) return alert('This browser has no geolocation.');
@@ -207,17 +217,16 @@ async function toggleBrowserLocation() {
       alert('Location error: ' + err.message);
       navigator.geolocation.clearWatch(browserWatchId);
       browserWatchId = null;
-      btn.textContent = '📡 Send my location';
+      btns.forEach((b) => (b.textContent = '📡 Send my location'));
     },
     { enableHighAccuracy: true, maximumAge: 15000 }
   );
-  btn.textContent = '🛑 Stop sending (browser)';
+  btns.forEach((b) => (b.textContent = '⏹ Stop sending'));
 }
 
 /* ---------- food preferences ---------- */
 function renderPrefs() {
   const el = document.getElementById('prefs-box');
-  const me = getMe();
   el.innerHTML = people.map((p) => `
     <div class="person-row">
       <div class="avatar" style="background:${p.color}">${esc(p.name.slice(0, 1).toUpperCase())}</div>
@@ -230,7 +239,7 @@ function renderPrefs() {
           ${!p.prefs.preferred.length && !p.prefs.okay.length && !p.prefs.no.length ? '<span class="chip">no preferences yet</span>' : ''}
         </div>
       </div>
-      <button class="btn small" data-name="${esc(p.name)}">${p.name === me ? 'Edit' : 'Edit ✏️'}</button>
+      <button class="btn small" data-name="${esc(p.name)}">Edit</button>
     </div>
   `).join('') || '<div class="empty">Add people first.</div>';
 
@@ -277,7 +286,7 @@ async function findFood() {
     const data = await api.get(url);
     renderFood(data);
   } catch (err) {
-    out.innerHTML = `<div class="empty">😕 ${esc(err.message)}<br><small>Tip: pan the map to where you want to search — with no shared locations we search the map center.</small></div>`;
+    out.innerHTML = `<div class="empty">😕 ${esc(err.message)}<br><small>Tip: with no shared locations we search the map center — pan the map first.</small></div>`;
   } finally {
     btn.disabled = false;
     btn.textContent = '🔎 Find food near us';
@@ -297,22 +306,22 @@ function renderFood(data) {
   const total = data.peopleConsidered.length;
 
   out.innerHTML = `
-    <p class="hint" style="margin-top:14px;">Ranked for ${total ? `${total} ${total === 1 ? 'person' : 'people'} with preferences` : 'the group'} · ${data.results.length} places found</p>
+    <p class="hint" style="margin-top:1.2rem;">Ranked for ${total ? `${total} ${total === 1 ? 'person' : 'people'} with preferences` : 'the group'} · ${data.results.length} places found</p>
     ${top.map((r, i) => `
       <div class="food-row" data-i="${i}">
-        <div class="food-rank ${i === 0 ? 'gold' : ''}">${i + 1}</div>
+        <div class="food-rank ${i === 0 ? 'gold' : ''}">${i + 1}.</div>
         <div class="food-main">
           <div class="nm">${esc(r.name)} ${r.nameKo && r.nameKo !== r.name ? `<span class="ko">${esc(r.nameKo)}</span>` : ''}</div>
           <div class="meta">${r.cuisine ? esc(r.cuisine) + ' · ' : ''}${r.distance} m away</div>
           ${total ? `
             <div class="match-bar"><div style="width:${Math.round((r.okCount / total) * 100)}%"></div></div>
-            <div class="meta" style="margin-top:3px;">
-              👍 works for ${r.okCount}/${total}
+            <div class="meta" style="margin-top:0.25rem;">
+              works for ${r.okCount}/${total}
               ${r.likedBy.length ? ' · 😍 ' + r.likedBy.map((l) => esc(l.name)).join(', ') : ''}
-              ${r.vetoedBy.length ? ` · <span style="color:var(--red)">🚫 ${r.vetoedBy.map((v) => `${esc(v.name)} (${esc(v.term)})`).join(', ')}</span>` : ''}
+              ${r.vetoedBy.length ? ` · <span class="veto-note">🚫 ${r.vetoedBy.map((v) => `${esc(v.name)} (${esc(v.term)})`).join(', ')}</span>` : ''}
             </div>` : ''}
         </div>
-        <button class="btn small" data-act="show">🗺️</button>
+        <button class="btn small" data-act="show">◎</button>
       </div>
     `).join('')}
   `;
@@ -320,10 +329,10 @@ function renderFood(data) {
   top.forEach((r, i) => {
     const m = L.circleMarker([r.lat, r.lon], {
       radius: 9,
-      color: '#fff',
+      color: '#f4ede1',
       weight: 2,
-      fillColor: i === 0 ? '#b8860b' : '#0f4c9c',
-      fillOpacity: 0.9
+      fillColor: i === 0 ? '#b8893a' : '#8a2818',
+      fillOpacity: 0.92
     }).addTo(map).bindPopup(
       `<strong>${i + 1}. ${esc(r.name)}</strong><br>${r.cuisine ? esc(r.cuisine) + '<br>' : ''}${r.distance} m · <a href="${r.osmUrl}" target="_blank" rel="noopener">OSM</a>`
     );
@@ -332,23 +341,30 @@ function renderFood(data) {
 
   out.querySelectorAll('[data-act=show]').forEach((b) =>
     b.addEventListener('click', () => {
-      const r = top[Number(b.closest('.food-row').dataset.i)];
-      map.setView([r.lat, r.lon], 17);
-      foodMarkers[Number(b.closest('.food-row').dataset.i)]?.openPopup();
+      const i = Number(b.closest('.food-row').dataset.i);
+      map.setView([top[i].lat, top[i].lon], 17);
+      foodMarkers[i]?.openPopup();
     }));
 
   if (top.length) {
-    const pts = top.map((r) => [r.lat, r.lon]);
-    map.fitBounds(L.latLngBounds(pts).pad(0.2), { maxZoom: 16 });
+    map.fitBounds(L.latLngBounds(top.map((r) => [r.lat, r.lon])).pad(0.2), { maxZoom: 16 });
   }
 }
 
 /* ---------- bills ---------- */
+let scanState = { items: [], photoPath: null, splitMode: 'even' };
+
 async function openBillDialog() {
   const me = await promptMe();
   const dlg = document.getElementById('bill-dialog');
   const form = document.getElementById('bill-form');
   form.reset();
+  scanState = { items: [], photoPath: null, splitMode: 'even' };
+  document.getElementById('scan-status').textContent = '';
+  document.getElementById('split-toggle').hidden = true;
+  document.getElementById('scan-items').hidden = true;
+  document.getElementById('items-note').hidden = true;
+  setSplitMode('even');
 
   const paidBy = document.getElementById('bill-paidby');
   paidBy.innerHTML = people.map((p) => `<option ${p.name === me ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
@@ -362,7 +378,7 @@ async function openBillDialog() {
     detected = d.detected.map((x) => x.name);
     note.textContent = detected.length
       ? `· 📍 auto-detected ${detected.length} nearby`
-      : '· no one detected nearby, pick manually';
+      : '· no one detected nearby — pick manually';
   } catch {
     note.textContent = '';
   }
@@ -376,17 +392,109 @@ async function openBillDialog() {
     chip.addEventListener('click', () => {
       chip.classList.toggle('on');
       chip.textContent = (chip.classList.contains('on') ? '✓ ' : '') + chip.dataset.name;
+      renderScanItems(); // assignment chips depend on who's included
     }));
 
   dlg.showModal();
+}
+
+function currentParticipants() {
+  return [...document.querySelectorAll('#bill-participants .detect-chip.on')].map((c) => c.dataset.name);
+}
+
+async function scanBill() {
+  const form = document.getElementById('bill-form');
+  const file = form.elements.photo.files[0];
+  const status = document.getElementById('scan-status');
+  if (!file) {
+    status.textContent = 'Pick or snap a photo first.';
+    return;
+  }
+  const btn = document.getElementById('scan-btn');
+  btn.disabled = true;
+  status.textContent = 'Claude is reading the bill…';
+  try {
+    const fd = new FormData();
+    fd.append('photo', file);
+    const r = await fetch('/api/bills/scan', { method: 'POST', body: fd });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'scan failed');
+    scanState.photoPath = data.photoPath;
+    if (!data.is_receipt) {
+      status.textContent = "That doesn't look like a receipt — enter the amount manually.";
+      return;
+    }
+    if (data.total > 0) form.elements.amount.value = data.total;
+    if (data.currency) form.elements.currency.value = data.currency.toUpperCase();
+    if (data.title && !form.elements.title.value) form.elements.title.value = data.title;
+    scanState.items = (data.items || []).map((it) => ({ ...it, assignedTo: [] }));
+    if (scanState.items.length) {
+      document.getElementById('split-toggle').hidden = false;
+      status.textContent = `Read ${scanState.items.length} items · total ${data.total} ${data.currency}`;
+    } else {
+      status.textContent = `Read total ${data.total} ${data.currency} (no line items found)`;
+    }
+    renderScanItems();
+  } catch (err) {
+    status.textContent = '⚠ ' + err.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function setSplitMode(mode) {
+  scanState.splitMode = mode;
+  document.querySelectorAll('#split-toggle button').forEach((b) =>
+    b.classList.toggle('on', b.dataset.mode === mode));
+  const showItems = mode === 'items' && scanState.items.length;
+  document.getElementById('scan-items').hidden = !showItems;
+  document.getElementById('items-note').hidden = !showItems;
+  if (showItems) renderScanItems();
+}
+
+function renderScanItems() {
+  const box = document.getElementById('scan-items');
+  if (scanState.splitMode !== 'items' || !scanState.items.length) return;
+  const participants = currentParticipants();
+  box.innerHTML = scanState.items.map((it, i) => `
+    <div class="scan-item" data-i="${i}">
+      <span class="nm">${esc(it.name)}${it.quantity > 1 ? ` ×${it.quantity}` : ''}</span>
+      <span class="pr">${it.price.toLocaleString()}</span>
+      <span class="assign">
+        ${participants.map((p) => `
+          <span class="assign-chip ${it.assignedTo.includes(p) ? 'on' : ''}" data-p="${esc(p)}">${esc(p)}</span>
+        `).join('')}
+        ${!participants.length ? '<span class="chip">pick participants above</span>' : ''}
+      </span>
+    </div>
+  `).join('');
+  box.querySelectorAll('.scan-item').forEach((row) => {
+    const item = scanState.items[Number(row.dataset.i)];
+    row.querySelectorAll('.assign-chip').forEach((chip) =>
+      chip.addEventListener('click', () => {
+        const p = chip.dataset.p;
+        const idx = item.assignedTo.indexOf(p);
+        if (idx >= 0) item.assignedTo.splice(idx, 1);
+        else item.assignedTo.push(p);
+        chip.classList.toggle('on');
+      }));
+  });
 }
 
 async function submitBill(e) {
   e.preventDefault();
   const form = e.target;
   const fd = new FormData(form);
-  const participants = [...document.querySelectorAll('#bill-participants .detect-chip.on')].map((c) => c.dataset.name);
-  fd.set('participants', JSON.stringify(participants));
+  fd.set('participants', JSON.stringify(currentParticipants()));
+  fd.set('splitMode', scanState.splitMode);
+  fd.set('items', JSON.stringify(scanState.splitMode === 'items' ? scanState.items : []));
+  if (scanState.photoPath) {
+    // Photo already uploaded during scan — reference it instead of re-uploading.
+    fd.delete('photo');
+    fd.set('photoPath', scanState.photoPath);
+  } else if (!form.elements.photo.files[0]) {
+    fd.delete('photo');
+  }
   const r = await fetch('/api/bills', { method: 'POST', body: fd });
   if (!r.ok) {
     const err = await r.json().catch(() => ({}));
@@ -405,25 +513,32 @@ async function refreshBills() {
   const currencies = Object.entries(summary || {});
   sEl.innerHTML = currencies.map(([cur, s]) =>
     s.transfers.length
-      ? `<p class="hint" style="margin:14px 0 4px;"><strong>To settle up (${cur}):</strong></p>` +
+      ? `<p class="hint" style="margin:1.2rem 0 0.2rem;">To settle up (${cur}):</p>` +
         s.transfers.map((t) => `
-          <div class="transfer">💸 <strong>${esc(t.from)}</strong> pays <strong>${esc(t.to)}</strong><span class="amt">${fmtMoney(t.amount, cur)}</span></div>
+          <div class="transfer"><em>${esc(t.from)}</em> pays <em>${esc(t.to)}</em><span class="amt">${fmtMoney(t.amount, cur)}</span></div>
         `).join('')
       : ''
   ).join('') || '';
 
-  list.innerHTML = bills.length ? bills.map((b) => `
+  list.innerHTML = bills.length ? bills.map((b) => {
+    const shareNote = b.splitMode === 'items'
+      ? 'by items'
+      : `split ${b.participants.length} way${b.participants.length === 1 ? '' : 's'}`;
+    const sharesDetail = b.shares
+      ? Object.entries(b.shares).map(([n, v]) => `${n}: ${fmtMoney(v, b.currency)}`).join(' · ')
+      : '';
+    return `
     <div class="bill-row">
       ${b.photo
         ? `<a href="${b.photo}" target="_blank" rel="noopener"><img class="bill-thumb" src="${b.photo}" alt="bill"></a>`
         : '<div class="bill-thumb">🧾</div>'}
       <div class="bill-main">
-        <div class="amt">${fmtMoney(b.amount, b.currency)} <span style="font-weight:500;color:var(--ink-soft);font-size:13px;">· ${esc(b.title)}</span></div>
-        <div class="meta">${esc(b.paidBy)} paid · split ${b.participants.length} ways (${b.participants.map(esc).join(', ')}) · ${timeAgo(b.createdAt)}</div>
+        <div class="amt">${fmtMoney(b.amount, b.currency)} <span class="ttl">· ${esc(b.title)}</span></div>
+        <div class="meta" title="${esc(sharesDetail)}">${esc(b.paidBy)} paid · ${shareNote} (${b.participants.map(esc).join(', ')}) · ${timeAgo(b.createdAt)}</div>
       </div>
       <button class="btn small danger" data-id="${b.id}">✕</button>
-    </div>
-  `).join('') : '<div class="empty">No bills yet — go eat something great 🍽️</div>';
+    </div>`;
+  }).join('') : '<div class="empty">No bills yet — go eat something great.</div>';
 
   list.querySelectorAll('button[data-id]').forEach((btn) =>
     btn.addEventListener('click', async () => {

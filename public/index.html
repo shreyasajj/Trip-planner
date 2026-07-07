@@ -5,51 +5,88 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Korea Trip · Itinerary</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>✈️</text></svg>">
+<link rel="stylesheet" href="/vendor/fonts/fonts.css">
 <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
+<div class="content">
 
-<header class="hero">
-  <div class="hero-inner">
-    <p class="kicker">Trip Companion</p>
-    <h1 id="trip-name">Korea Trip</h1>
-    <p class="sub" id="trip-dates"></p>
-    <div class="countdown" id="countdown" hidden></div>
-    <div class="identity-bar">
-      <button class="who" id="who-btn" title="Who is using this device">👤 …</button>
-      <button class="who" id="edit-trip-btn">✏️ Edit trip</button>
-    </div>
+  <div class="meta-bar">
+    <span class="brand"><span class="dot"></span><span id="brand-label">Itinerary · Korea Trip</span></span>
+    <nav class="meta-nav">
+      <a href="/" class="active">Itinerary</a>
+      <a href="/map.html">Find Us</a>
+      <button class="who-btn" id="who-btn">👤 …</button>
+      <button class="who-btn" id="edit-trip-btn">✎ Edit trip</button>
+    </nav>
   </div>
-</header>
 
-<main>
-  <section class="card">
-    <h2>✈️ Flights</h2>
-    <p class="hint">Tap <em>Check status</em> to query live delays. <span id="flight-api-note"></span></p>
-    <div id="flights"></div>
-    <div class="section-actions">
-      <button class="btn primary" id="add-flight-btn">＋ Add flight</button>
-      <button class="btn" id="refresh-all-btn">🔄 Check all statuses</button>
+  <header class="hero">
+    <div class="hero-left">
+      <div class="hangul">한국</div>
+      <h1 class="hero-title" id="trip-title">Korea,<br><em>someday</em> soon.</h1>
+      <div class="hero-dates" id="trip-dates"></div>
+      <p class="hero-sub" id="countdown"></p>
+      <p class="hero-sub" style="margin-top:0.9rem; display:flex; gap:0.6rem; animation:none;">
+        <button class="who-btn" id="who-btn-m">👤 …</button>
+        <button class="who-btn" id="edit-trip-btn-m">✎ Edit trip</button>
+      </p>
     </div>
-  </section>
-
-  <section class="card">
-    <h2>🗓️ Itinerary</h2>
-    <p class="hint">Where we're staying and what's next, day by day.</p>
-    <div class="timeline" id="itinerary"></div>
-    <div class="section-actions">
-      <button class="btn primary" id="add-day-btn">＋ Add a day</button>
+    <div class="hero-right">
+      <div class="stamp">
+        <div class="stamp-top">大韓</div>
+        <div class="stamp-line"></div>
+        <div class="stamp-mid" id="stamp-mid">The Trip</div>
+        <div class="stamp-line"></div>
+        <div class="stamp-date" id="stamp-date"></div>
+      </div>
     </div>
+  </header>
+
+  <section class="glance" id="glance" hidden>
+    <div class="section-label">At a glance</div>
+    <h2 class="glance-title">The whole trip, <em>panel by panel.</em></h2>
+    <div class="glance-grid" id="glance-grid"></div>
   </section>
 
-  <section class="card" id="notes-card" hidden>
-    <h2>📝 Trip notes</h2>
-    <p id="trip-notes" style="white-space:pre-wrap; font-size:14.5px;"></p>
-  </section>
-</main>
+  <main>
+    <section class="card">
+      <div class="section-label">Sec. I — The Flights</div>
+      <h2>Wings <em>across the Pacific.</em></h2>
+      <p class="hint">Tap Check status to query live delays, gates and terminals. <span id="flight-api-note"></span></p>
+      <div id="flights"></div>
+      <div class="section-actions">
+        <button class="btn primary" id="add-flight-btn">＋ Add flight</button>
+        <button class="btn" id="refresh-all-btn">↻ Check all statuses</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-label">Sec. II — The Days</div>
+      <h2>Where we sleep, <em>what comes next.</em></h2>
+      <p class="hint">The passage, day by day — stays, trains, palaces, and late-night food alleys.</p>
+      <div id="itinerary"></div>
+      <div class="section-actions">
+        <button class="btn primary" id="add-day-btn">＋ Add a day</button>
+      </div>
+    </section>
+
+    <section class="card" id="notes-card" hidden>
+      <div class="section-label">Sec. III — Notes</div>
+      <h2>Things to <em>remember.</em></h2>
+      <p class="notes-body" id="trip-notes"></p>
+    </section>
+  </main>
+
+  <footer>
+    <div class="footer-stamp">여행</div>
+    <div class="footer-meta" id="footer-meta">Itinerary · 안전한 여행 되세요</div>
+  </footer>
+
+</div>
 
 <nav class="bottom-nav">
-  <a href="/" class="active"><span class="ico">🗓️</span>Itinerary</a>
+  <a href="/" class="active"><span class="ico">🗓</span>Itinerary</a>
   <a href="/map.html"><span class="ico">📍</span>Find Us</a>
 </nav>
 
@@ -83,7 +120,7 @@
       <label class="f">Date<input name="date" type="date" required></label>
       <label class="f">City<input name="city" placeholder="Seoul"></label>
       <label class="f wide">Day title<input name="title" placeholder="Palaces & Bukchon"></label>
-      <label class="f wide">Where we sleep (leave blank if same as before)<input name="stayName" placeholder="Hotel in Myeongdong"></label>
+      <label class="f wide">Where we sleep (blank = same as before)<input name="stayName" placeholder="Hotel in Myeongdong"></label>
       <label class="f wide">Stay address<input name="stayAddress" placeholder="Myeongdong, Jung-gu, Seoul"></label>
       <label class="f wide">Plan — one item per line, "HH:MM activity"<textarea name="plan" rows="6" placeholder="09:00 Gyeongbokgung Palace&#10;12:00 Lunch in Insadong"></textarea></label>
     </div>

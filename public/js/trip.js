@@ -2,10 +2,16 @@ let tripData = null;
 let editingFlight = null;
 let editingDay = null;
 
+const ROMAN = ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x', 'xi', 'xii', 'xiii', 'xiv', 'xv', 'xvi', 'xvii', 'xviii', 'xix', 'xx'];
+const roman = (n) => ROMAN[n] || String(n + 1);
+
 init();
 
 async function init() {
-  document.getElementById('who-btn').addEventListener('click', () => promptMe(true).then(updateWho));
+  for (const id of ['who-btn', 'who-btn-m'])
+    document.getElementById(id)?.addEventListener('click', () => promptMe(true).then(updateWho));
+  for (const id of ['edit-trip-btn', 'edit-trip-btn-m'])
+    document.getElementById(id)?.addEventListener('click', openTripDialog);
   updateWho();
   wireDialogs();
   await load();
@@ -13,25 +19,29 @@ async function init() {
 }
 
 function updateWho() {
-  document.getElementById('who-btn').textContent = `👤 ${getMe() || 'Set your name'}`;
+  const label = `👤 ${getMe() || 'Set your name'}`;
+  for (const id of ['who-btn', 'who-btn-m']) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = label;
+  }
 }
 
 async function load() {
   tripData = await api.get('/api/trip');
   renderHeader();
+  renderGlance();
   renderFlights();
   renderItinerary();
 }
 
 async function checkFlightApi() {
-  // Ask the server about one flight to learn whether an API key is configured.
   const note = document.getElementById('flight-api-note');
   const f = tripData.flights[0];
   if (!f) return;
   try {
     const s = await api.get(`/api/flights/${f.id}/status`);
     if (!s.available) {
-      note.innerHTML = '⚠️ No flight API key configured — statuses are manual. See the README to enable live delays.';
+      note.textContent = '⚠ No flight API key configured — see the README to enable live delays.';
     } else {
       applyStatus(f.id, s);
     }
@@ -39,12 +49,36 @@ async function checkFlightApi() {
 }
 
 /* ---------- header ---------- */
+function fmtShort(iso) {
+  const d = new Date(iso + 'T00:00:00');
+  return isNaN(d) ? iso : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toUpperCase();
+}
+
 function renderHeader() {
   const t = tripData.trip;
-  document.getElementById('trip-name').textContent = t.name;
   document.title = `${t.name} · Itinerary`;
-  document.getElementById('trip-dates').textContent =
-    t.startDate && t.endDate ? `${fmtDate(t.startDate)} → ${fmtDate(t.endDate)}` : '';
+  document.getElementById('brand-label').textContent = `Itinerary · ${t.name}`;
+
+  // Title: last word gets the italic rouge treatment
+  const words = t.name.split(' ');
+  const last = words.pop();
+  document.getElementById('trip-title').innerHTML =
+    `${esc(words.join(' '))}${words.length ? '<br>' : ''}<em>${esc(last)}</em>`;
+
+  const dates = document.getElementById('trip-dates');
+  if (t.startDate && t.endDate) {
+    const year = new Date(t.endDate + 'T00:00:00').getFullYear();
+    dates.innerHTML = `<strong>${fmtShort(t.startDate)}</strong> ──────── <strong>${fmtShort(t.endDate)}</strong> · ${year}`;
+    dates.hidden = false;
+    document.getElementById('stamp-date').textContent = `${fmtShort(t.startDate)} — ${fmtShort(t.endDate)}`;
+    document.getElementById('stamp-mid').textContent = `Autumn '${String(year).slice(2)}`;
+    const nights = Math.round((new Date(t.endDate) - new Date(t.startDate)) / 86400000);
+    document.getElementById('footer-meta').textContent =
+      `Itinerary · ${t.name} · ${fmtShort(t.startDate)} — ${fmtShort(t.endDate)} · 안전한 여행 되세요`.toUpperCase();
+    void nights;
+  } else {
+    dates.hidden = true;
+  }
 
   const cd = document.getElementById('countdown');
   if (t.startDate) {
@@ -52,15 +86,48 @@ function renderHeader() {
     const start = new Date(t.startDate + 'T00:00:00');
     const end = t.endDate ? new Date(t.endDate + 'T23:59:59') : start;
     const days = Math.ceil((start - now) / 86400000);
-    cd.hidden = false;
-    if (now < start) cd.innerHTML = `<strong>${days}</strong> day${days === 1 ? '' : 's'} until takeoff 🛫`;
-    else if (now <= end) cd.innerHTML = `🇰🇷 <strong>We're in Korea!</strong> Enjoy day ${Math.floor((now - start) / 86400000) + 1}`;
-    else cd.innerHTML = `Trip complete — <strong>안녕히!</strong> Time to plan the next one`;
-  } else cd.hidden = true;
+    if (now < start) cd.innerHTML = `T−<strong>${days}</strong> day${days === 1 ? '' : 's'} until takeoff · 출발까지`;
+    else if (now <= end) cd.innerHTML = `<strong>Day ${Math.floor((now - start) / 86400000) + 1}</strong> · we are in Korea 🇰🇷`;
+    else cd.innerHTML = `Trip complete · <strong>완. 끝.</strong>`;
+  } else cd.textContent = '';
 
   const notes = document.getElementById('notes-card');
   notes.hidden = !t.notes;
   document.getElementById('trip-notes').textContent = t.notes || '';
+}
+
+/* ---------- glance strip: consecutive itinerary days grouped by city ---------- */
+function renderGlance() {
+  const days = tripData.itinerary;
+  const wrap = document.getElementById('glance');
+  if (days.length < 2) { wrap.hidden = true; return; }
+
+  const groups = [];
+  for (const d of days) {
+    const g = groups[groups.length - 1];
+    if (g && g.city === (d.city || '—')) g.dates.push(d.date);
+    else groups.push({ city: d.city || '—', dates: [d.date] });
+  }
+  if (groups.length < 2) { wrap.hidden = true; return; }
+
+  const fmt = (iso) => {
+    const d = new Date(iso + 'T00:00:00');
+    return isNaN(d) ? iso : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+  wrap.hidden = false;
+  document.getElementById('glance-grid').innerHTML = groups.map((g, i) => {
+    const first = g.dates[0];
+    // A leg "ends" when the next leg begins (or trip end for the last one)
+    const next = groups[i + 1]?.dates[0] || tripData.trip.endDate || g.dates[g.dates.length - 1];
+    const nights = Math.max(1, Math.round((new Date(next) - new Date(first)) / 86400000));
+    return `
+      <div class="glance-cell">
+        <div class="glance-num">${roman(i)} / ${roman(groups.length - 1)}</div>
+        <div class="glance-place">${esc(g.city)}</div>
+        <div class="glance-dates">${fmt(first)} – ${fmt(next)}</div>
+        <div class="glance-nights">${nights} night${nights === 1 ? '' : 's'}</div>
+      </div>`;
+  }).join('');
 }
 
 /* ---------- flights ---------- */
@@ -72,22 +139,24 @@ function renderFlights() {
   }
   el.innerHTML = tripData.flights.map((f) => `
     <div class="flight" data-id="${f.id}">
-      <div class="flight-top">
+      <div>
         <div class="flight-route">
-          <span>${esc(f.from || '???')}<span class="times">${esc(f.depTimeLocal || '')}</span></span>
-          <span class="plane">✈</span>
-          <span>${esc(f.to || '???')}<span class="times">${esc(f.arrTimeLocal || '')}</span></span>
+          <span><span class="code">${esc(f.from || '???')}</span><span class="times">${esc(f.depTimeLocal || '')}</span></span>
+          <span class="arrow">→</span>
+          <span><span class="code">${esc(f.to || '???')}</span><span class="times">${esc(f.arrTimeLocal || '')}</span></span>
         </div>
+        <div class="flight-meta">
+          <strong>${esc(f.flightNumber)}</strong> · ${fmtDate(f.date)}${f.airline ? ` · <span>${esc(f.airline)}</span>` : ''}${f.notes ? `<br>${esc(f.notes)}` : ''}
+        </div>
+        <div class="flight-tools" style="margin-top:0.8rem;">
+          <button class="btn small primary" data-act="status">Check status</button>
+          <button class="btn small" data-act="edit">Edit</button>
+          <button class="btn small danger" data-act="del">✕</button>
+        </div>
+      </div>
+      <div class="flight-side">
         <span class="badge muted status-badge">Scheduled</span>
-      </div>
-      <div class="flight-meta">
-        <strong>${esc(f.flightNumber)}</strong>${f.airline ? ' · ' + esc(f.airline) : ''} · ${fmtDate(f.date)}${f.notes ? ' · ' + esc(f.notes) : ''}
-      </div>
-      <div class="flight-status" hidden></div>
-      <div class="section-actions">
-        <button class="btn small primary" data-act="status">Check status</button>
-        <button class="btn small" data-act="edit">Edit</button>
-        <button class="btn small danger" data-act="del">Delete</button>
+        <div class="flight-status" hidden></div>
       </div>
     </div>
   `).join('');
@@ -137,7 +206,7 @@ function applyStatus(fid, s) {
     badge.className = 'badge muted status-badge';
     badge.textContent = 'Not found yet';
     detail.hidden = false;
-    detail.textContent = 'The provider has no data for this flight/date yet — try closer to departure.';
+    detail.textContent = 'No data for this flight/date yet — try closer to departure.';
     return;
   }
 
@@ -150,12 +219,12 @@ function applyStatus(fid, s) {
   detail.hidden = false;
   detail.innerHTML = `
     <div class="row">
-      <span>Status: <strong>${esc(s.status)}</strong></span>
-      <span>Dep: ${fmt(s.depScheduled)}${s.depEstimated ? ` → <span class="delay-num">${fmt(s.depEstimated)}</span>` : ''}</span>
-      <span>Arr: ${fmt(s.arrScheduled)}${s.arrEstimated ? ` → <span class="delay-num">${fmt(s.arrEstimated)}</span>` : ''}</span>
-      ${s.depGate ? `<span>Gate <strong>${esc(s.depGate)}</strong>${s.depTerminal ? ' · T' + esc(s.depTerminal) : ''}</span>` : ''}
+      <span><span>Status</span><span>${esc(s.status)}</span></span>
+      <span><span>Departs</span><span>${fmt(s.depScheduled)}${s.depEstimated ? ` → <span class="delay-num">${fmt(s.depEstimated)}</span>` : ''}</span></span>
+      <span><span>Arrives</span><span>${fmt(s.arrScheduled)}${s.arrEstimated ? ` → <span class="delay-num">${fmt(s.arrEstimated)}</span>` : ''}</span></span>
+      ${s.depGate ? `<span><span>Gate</span><span>${esc(s.depGate)}${s.depTerminal ? ' · T' + esc(s.depTerminal) : ''}</span></span>` : ''}
     </div>
-    <div style="margin-top:4px; color: var(--ink-faint); font-size:12px;">via ${esc(s.provider)} · ${timeAgo(s.fetchedAt)}</div>
+    <div class="src">via ${esc(s.provider)} · ${timeAgo(s.fetchedAt)}</div>
   `;
 }
 
@@ -167,25 +236,27 @@ function renderItinerary() {
     return;
   }
   const todayIso = new Date().toISOString().slice(0, 10);
-  el.innerHTML = tripData.itinerary.map((d) => `
+  el.innerHTML = tripData.itinerary.map((d, i) => `
     <div class="day ${d.date === todayIso ? 'today' : ''}" data-id="${d.id}">
-      <div class="day-head">
-        <span class="day-date">${fmtDate(d.date)}</span>
-        ${d.city ? `<span class="day-city">${esc(d.city)}</span>` : ''}
-        ${d.title ? `<span class="day-title">${esc(d.title)}</span>` : ''}
-        ${d.date === todayIso ? '<span class="badge ok">Today</span>' : ''}
-      </div>
-      ${d.stay ? `
-        <div class="stay">🏨 <strong>${esc(d.stay.name)}</strong>
-          ${d.stay.address ? `<div class="addr">${esc(d.stay.address)}</div>` : ''}
-          ${d.stay.checkIn ? `<div class="addr">Check-in ${fmtDate(d.stay.checkIn)}${d.stay.checkOut ? ` · out ${fmtDate(d.stay.checkOut)}` : ''}</div>` : ''}
-        </div>` : ''}
-      ${(d.items || []).map((it) => `
-        <div class="plan-item"><span class="t">${esc(it.time || '·')}</span><span>${esc(it.text)}</span></div>
-      `).join('')}
-      <div class="day-tools">
-        <button class="btn small" data-act="edit">Edit</button>
-        <button class="btn small danger" data-act="del">Delete</button>
+      <div class="day-num">${roman(i)}<small>${d.stay ? 'Stay' : 'Day'}</small></div>
+      <div>
+        <div class="day-head">
+          <span class="day-date">${fmtDate(d.date)}${d.date === todayIso ? ' · Today' : ''}</span>
+          ${d.city ? `<span class="day-city">${esc(d.city)}</span>` : ''}
+          ${d.title ? `<span class="day-title">${esc(d.title)}</span>` : ''}
+        </div>
+        ${d.stay ? `
+          <div class="stay">⌂ <strong>${esc(d.stay.name)}</strong>
+            ${d.stay.address ? `<div class="addr">${esc(d.stay.address)}</div>` : ''}
+            ${d.stay.checkIn ? `<div class="addr">in ${fmtDate(d.stay.checkIn)}${d.stay.checkOut ? ` · out ${fmtDate(d.stay.checkOut)}` : ''}</div>` : ''}
+          </div>` : ''}
+        ${(d.items || []).map((it) => `
+          <div class="plan-item"><span class="t">${esc(it.time || '·')}</span><span>${esc(it.text)}</span></div>
+        `).join('')}
+        <div class="day-tools">
+          <button class="btn small" data-act="edit">Edit</button>
+          <button class="btn small danger" data-act="del">✕</button>
+        </div>
       </div>
     </div>
   `).join('');
@@ -208,7 +279,6 @@ function wireDialogs() {
 
   document.getElementById('add-flight-btn').addEventListener('click', () => openFlightDialog(null));
   document.getElementById('add-day-btn').addEventListener('click', () => openDayDialog(null));
-  document.getElementById('edit-trip-btn').addEventListener('click', openTripDialog);
   document.getElementById('refresh-all-btn').addEventListener('click', async () => {
     for (const f of tripData.flights) {
       const card = document.querySelector(`.flight[data-id="${f.id}"]`);
